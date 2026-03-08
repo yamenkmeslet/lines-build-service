@@ -111,6 +111,15 @@ app.post('/build', authMiddleware, async (req, res) => {
       },
     };
 
+    const reactDomClientFirstPlugin = {
+      name: 'react-dom-client-first',
+      setup(build) {
+        build.onResolve({ filter: /^react-dom\/client$/ }, () => ({
+          path: reactDomClientShimPath,
+        }));
+      },
+    };
+
     const result = await esbuild.build({
       entryPoints: [entryPath],
       bundle: true,
@@ -126,6 +135,7 @@ app.post('/build', authMiddleware, async (req, res) => {
         'clsx': clsxShimPath,
       },
       plugins: [
+        reactDomClientFirstPlugin,
         cssExtractPlugin,
         {
           name: 'react-icons-shim',
