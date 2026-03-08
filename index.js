@@ -50,6 +50,9 @@ app.post('/build', authMiddleware, async (req, res) => {
     const reactDomShimPath = path.join(buildDir, '__react-dom-shim.js');
     await fs.promises.writeFile(reactShimPath, "module.exports = typeof window !== 'undefined' ? window.React : {};", 'utf-8');
     await fs.promises.writeFile(reactDomShimPath, "module.exports = typeof window !== 'undefined' ? window.ReactDOM : {};", 'utf-8');
+    await fs.promises.writeFile(path.join(buildDir, '__framer-shim.js'), 'module.exports = {};', 'utf-8');
+    await fs.promises.writeFile(path.join(buildDir, '__react-icons-shim.js'), 'module.exports = {};', 'utf-8');
+    await fs.promises.writeFile(path.join(buildDir, '__clsx-shim.js'), "module.exports = function clsx() { return Array.from(arguments).filter(Boolean).join(' '); };", 'utf-8');
 
     const entryCandidates = [
       'src/main.tsx', 'src/main.jsx', 'src/main.ts', 'src/main.js',
@@ -86,8 +89,11 @@ app.post('/build', authMiddleware, async (req, res) => {
       target: ['es2020'],
       write: false,
       alias: {
-        react: reactShimPath,
+        'react': reactShimPath,
         'react-dom': reactDomShimPath,
+        'framer-motion': path.join(buildDir, '__framer-shim.js'),
+        'react-icons': path.join(buildDir, '__react-icons-shim.js'),
+        'clsx': path.join(buildDir, '__clsx-shim.js'),
       },
       loader: {
         '.tsx': 'tsx',
@@ -119,6 +125,7 @@ app.post('/build', authMiddleware, async (req, res) => {
   <div id="root"></div>
   <script crossorigin src="${REACT_CDN}"></script>
   <script crossorigin src="${REACT_DOM_CDN}"></script>
+  <script src="https://unpkg.com/framer-motion@11/dist/framer-motion.js"></script>
   <script>${bundleJs}</script>
 </body>
 </html>`;
