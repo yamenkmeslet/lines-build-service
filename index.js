@@ -5,7 +5,7 @@ const path = require('path');
 const os = require('os');
 
 const app = express();
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '100mb' }));
 
 const PORT = process.env.PORT || 3001;
 const BUILD_SECRET = process.env.BUILD_SECRET;
