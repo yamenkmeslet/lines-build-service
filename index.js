@@ -92,9 +92,23 @@ app.post('/build', authMiddleware, async (req, res) => {
         'react': reactShimPath,
         'react-dom': reactDomShimPath,
         'framer-motion': path.join(buildDir, '__framer-shim.js'),
-        'react-icons': path.join(buildDir, '__react-icons-shim.js'),
         'clsx': path.join(buildDir, '__clsx-shim.js'),
       },
+      plugins: [
+        {
+          name: 'react-icons-shim',
+          setup(build) {
+            build.onResolve({ filter: /^react-icons\// }, args => ({
+              path: args.path,
+              namespace: 'react-icons-shim',
+            }));
+            build.onLoad({ filter: /.*/, namespace: 'react-icons-shim' }, () => ({
+              contents: 'module.exports = {};',
+              loader: 'js',
+            }));
+          },
+        },
+      ],
       loader: {
         '.tsx': 'tsx',
         '.ts': 'ts',
