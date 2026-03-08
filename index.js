@@ -81,6 +81,26 @@ app.post('/build', authMiddleware, async (req, res) => {
       return res.status(400).json({ success: false, error: 'No entry file found (e.g. src/main.tsx, src/App.tsx)' });
     }
 
+    const collectedCss = [];
+    const cssExtractPlugin = {
+      name: 'css-extract',
+      setup(build) {
+        build.onResolve({ filter: /\.css$/ }, (args) => {
+          const resolved = path.resolve(path.dirname(args.importer), args.path);
+          return { path: resolved, namespace: 'css-extract' };
+        });
+        build.onLoad({ filter: /.*/, namespace: 'css-extract' }, async (args) => {
+          try {
+            const content = await fs.promises.readFile(args.path, 'utf-8');
+            collectedCss.push(content);
+          } catch (e) {
+            console.warn('[lines-build-service] css read failed:', args.path, e.message);
+          }
+          return { contents: 'module.exports = undefined;', loader: 'js' };
+        });
+      },
+    };
+
     const result = await esbuild.build({
       entryPoints: [entryPath],
       bundle: true,
@@ -95,6 +115,7 @@ app.post('/build', authMiddleware, async (req, res) => {
         'clsx': path.join(buildDir, '__clsx-shim.js'),
       },
       plugins: [
+        cssExtractPlugin,
         {
           name: 'react-icons-shim',
           setup(build) {
@@ -115,7 +136,6 @@ app.post('/build', authMiddleware, async (req, res) => {
         '.jsx': 'jsx',
         '.js': 'js',
         '.json': 'json',
-        '.css': 'css',
       },
       define: {
         'process.env.NODE_ENV': '"production"',
@@ -124,6 +144,7 @@ app.post('/build', authMiddleware, async (req, res) => {
 
     const out = result.outputFiles[0];
     const bundleJs = out ? out.text : '';
+    const bundledCss = collectedCss.join('\n');
 
     const REACT_CDN = 'https://unpkg.com/react@18/umd/react.production.min.js';
     const REACT_DOM_CDN = 'https://unpkg.com/react-dom@18/umd/react-dom.production.min.js';
@@ -133,7 +154,7 @@ app.post('/build', authMiddleware, async (req, res) => {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>App</title>
+  <title>App</title>${bundledCss ? `\n  <style>${bundledCss.replace(/<\/style>/gi, '\\3c/style>')}</style>` : ''}
 </head>
 <body>
   <div id="root"></div>
@@ -144,7 +165,10 @@ app.post('/build', authMiddleware, async (req, res) => {
 </body>
 </html>`;
 
-    res.json({ success: true, indexHtml, assets: {} });
+    const assets = {};
+    if (bundledCss) assets['main.css'] = bundledCss;
+
+    res.json({ success: true, indexHtml, assets });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[lines-build-service] build error:', err);
