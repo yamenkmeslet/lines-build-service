@@ -32,7 +32,7 @@ app.post('/build', authMiddleware, async (req, res) => {
   try {
     const { files } = req.body;
     if (!files || typeof files !== 'object') {
-      return res.status(400).json({ success: false, error: 'Missing or invalid body: { files: Record<string, string> }' });
+      return res.status(400).json({ success: false, error: 'Missing or invalid body: { files: Record<string, string> }', code: 'INVALID_REQUEST' });
     }
 
     await fs.promises.mkdir(buildDir, { recursive: true });
@@ -46,10 +46,19 @@ app.post('/build', authMiddleware, async (req, res) => {
       await fs.promises.writeFile(fullPath, content, 'utf-8');
     }
 
-    const reactShimPath = path.join(buildDir, '__react-shim.js');
-    const reactDomShimPath = path.join(buildDir, '__react-dom-shim.js');
-    await fs.promises.writeFile(reactShimPath, "module.exports = typeof window !== 'undefined' ? window.React : {};", 'utf-8');
-    await fs.promises.writeFile(reactDomShimPath, "module.exports = typeof window !== 'undefined' ? window.ReactDOM : {};", 'utf-8');
+    const toPosix = (p) => (p || '').split(path.sep).join('/');
+    const reactShimPath = toPosix(path.join(buildDir, '__react-shim.js'));
+    const reactDomShimPath = toPosix(path.join(buildDir, '__react-dom-shim.js'));
+    const reactDomClientShimPath = toPosix(path.join(buildDir, '__react-dom-client-shim.js'));
+    const framerShimPath = toPosix(path.join(buildDir, '__framer-shim.js'));
+    const clsxShimPath = toPosix(path.join(buildDir, '__clsx-shim.js'));
+    await fs.promises.writeFile(path.join(buildDir, '__react-shim.js'), "module.exports = typeof window !== 'undefined' ? window.React : {};", 'utf-8');
+    await fs.promises.writeFile(path.join(buildDir, '__react-dom-shim.js'), "module.exports = typeof window !== 'undefined' ? window.ReactDOM : {};", 'utf-8');
+    await fs.promises.writeFile(
+      path.join(buildDir, '__react-dom-client-shim.js'),
+      "var ReactDOM = typeof window !== 'undefined' ? window.ReactDOM : {};\nmodule.exports = { createRoot: ReactDOM.createRoot || function() { throw new Error('createRoot requires ReactDOM'); }, hydrateRoot: ReactDOM.hydrateRoot || function() { throw new Error('hydrateRoot requires ReactDOM'); } };",
+      'utf-8'
+    );
     await fs.promises.writeFile(path.join(buildDir, '__framer-shim.js'), 'module.exports = {};', 'utf-8');
     await fs.promises.writeFile(path.join(buildDir, '__react-icons-shim.js'), 'module.exports = {};', 'utf-8');
     await fs.promises.writeFile(path.join(buildDir, '__clsx-shim.js'), "module.exports = function clsx() { return Array.from(arguments).filter(Boolean).join(' '); };", 'utf-8');
@@ -78,7 +87,7 @@ app.post('/build', authMiddleware, async (req, res) => {
       }
     }
     if (!entryPath) {
-      return res.status(400).json({ success: false, error: 'No entry file found (e.g. src/main.tsx, src/App.tsx)' });
+      return res.status(400).json({ success: false, error: 'No entry file found (e.g. src/main.tsx, src/App.tsx)', code: 'NO_ENTRY' });
     }
 
     const collectedCss = [];
@@ -87,14 +96,15 @@ app.post('/build', authMiddleware, async (req, res) => {
       setup(build) {
         build.onResolve({ filter: /\.css$/ }, (args) => {
           const resolved = path.resolve(path.dirname(args.importer), args.path);
-          return { path: resolved, namespace: 'css-extract' };
+          return { path: toPosix(resolved), namespace: 'css-extract' };
         });
         build.onLoad({ filter: /.*/, namespace: 'css-extract' }, async (args) => {
+          const filePath = args.path.split('/').join(path.sep);
           try {
-            const content = await fs.promises.readFile(args.path, 'utf-8');
+            const content = await fs.promises.readFile(filePath, 'utf-8');
             collectedCss.push(content);
           } catch (e) {
-            console.warn('[lines-build-service] css read failed:', args.path, e.message);
+            console.warn('[lines-build-service] css read failed:', filePath, e.message);
           }
           return { contents: 'module.exports = undefined;', loader: 'js' };
         });
@@ -109,10 +119,11 @@ app.post('/build', authMiddleware, async (req, res) => {
       target: ['es2020'],
       write: false,
       alias: {
+        'react-dom/client': reactDomClientShimPath,
         'react': reactShimPath,
         'react-dom': reactDomShimPath,
-        'framer-motion': path.join(buildDir, '__framer-shim.js'),
-        'clsx': path.join(buildDir, '__clsx-shim.js'),
+        'framer-motion': framerShimPath,
+        'clsx': clsxShimPath,
       },
       plugins: [
         cssExtractPlugin,
@@ -172,7 +183,8 @@ app.post('/build', authMiddleware, async (req, res) => {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[lines-build-service] build error:', err);
-    res.status(500).json({ success: false, error: message });
+    const code = message.includes('Could not resolve') || message.includes('resolve') ? 'RESOLVE_FAILED' : message.includes('Build') || message.includes('build') ? 'BUILD_FAILED' : 'BUILD_FAILED';
+    res.status(500).json({ success: false, error: message, code });
   } finally {
     try {
       await fs.promises.rm(buildDir, { recursive: true, force: true });
