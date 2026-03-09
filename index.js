@@ -28,7 +28,7 @@ app.get('/health', (req, res) => {
 
 app.post('/build', authMiddleware, async (req, res) => {
   console.log('[lines-build-service] POST /build request received');
-  const buildDir = path.join(os.tmpdir(), `lines-build-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
+  const buildDir = path.join(__dirname, 'tmp', `lines-build-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`);
   try {
     const { files } = req.body;
     if (!files || typeof files !== 'object') {
@@ -47,9 +47,10 @@ app.post('/build', authMiddleware, async (req, res) => {
     }
 
     const toPosix = (p) => (p || '').split(path.sep).join('/');
-    const reactShimPath = toPosix(path.join(buildDir, '__react-shim.js'));
-    const reactDomShimPath = toPosix(path.join(buildDir, '__react-dom-shim.js'));
-    const reactDomClientShimPath = toPosix(path.join(buildDir, '__react-dom-client-shim.js'));
+    const reactShimPath = path.resolve(buildDir, '__react-shim.js');
+    const reactDomShimPath = path.resolve(buildDir, '__react-dom-shim.js');
+    const reactDomClientShimPath = path.resolve(buildDir, '__react-dom-client-shim.js');
+    console.log('reactShimPath:', reactShimPath);
     await fs.promises.writeFile(path.join(buildDir, '__react-shim.js'), "module.exports = typeof window !== 'undefined' ? window.React : {};", 'utf-8');
     await fs.promises.writeFile(path.join(buildDir, '__react-dom-shim.js'), "module.exports = typeof window !== 'undefined' ? window.ReactDOM : {};", 'utf-8');
     await fs.promises.writeFile(
@@ -126,6 +127,8 @@ app.post('/build', authMiddleware, async (req, res) => {
         'react-dom/client': reactDomClientShimPath,
         'react': reactShimPath,
         'react-dom': reactDomShimPath,
+        'react/jsx-runtime': path.resolve(__dirname, 'node_modules/react/jsx-runtime.js'),
+        'react/jsx-dev-runtime': path.resolve(__dirname, 'node_modules/react/jsx-dev-runtime.js'),
       },
       plugins: [
         reactDomClientFirstPlugin,
@@ -141,6 +144,7 @@ app.post('/build', authMiddleware, async (req, res) => {
       define: {
         'process.env.NODE_ENV': '"production"',
       },
+      nodePaths: [path.join(__dirname, 'node_modules')],
     });
 
     const out = result.outputFiles[0];
