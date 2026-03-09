@@ -50,8 +50,6 @@ app.post('/build', authMiddleware, async (req, res) => {
     const reactShimPath = toPosix(path.join(buildDir, '__react-shim.js'));
     const reactDomShimPath = toPosix(path.join(buildDir, '__react-dom-shim.js'));
     const reactDomClientShimPath = toPosix(path.join(buildDir, '__react-dom-client-shim.js'));
-    const framerShimPath = toPosix(path.join(buildDir, '__framer-shim.js'));
-    const clsxShimPath = toPosix(path.join(buildDir, '__clsx-shim.js'));
     await fs.promises.writeFile(path.join(buildDir, '__react-shim.js'), "module.exports = typeof window !== 'undefined' ? window.React : {};", 'utf-8');
     await fs.promises.writeFile(path.join(buildDir, '__react-dom-shim.js'), "module.exports = typeof window !== 'undefined' ? window.ReactDOM : {};", 'utf-8');
     await fs.promises.writeFile(
@@ -59,9 +57,6 @@ app.post('/build', authMiddleware, async (req, res) => {
       "var ReactDOM = typeof window !== 'undefined' ? window.ReactDOM : {};\nmodule.exports = { createRoot: ReactDOM.createRoot || function() { throw new Error('createRoot requires ReactDOM'); }, hydrateRoot: ReactDOM.hydrateRoot || function() { throw new Error('hydrateRoot requires ReactDOM'); } };",
       'utf-8'
     );
-    await fs.promises.writeFile(path.join(buildDir, '__framer-shim.js'), 'module.exports = {};', 'utf-8');
-    await fs.promises.writeFile(path.join(buildDir, '__react-icons-shim.js'), 'module.exports = {};', 'utf-8');
-    await fs.promises.writeFile(path.join(buildDir, '__clsx-shim.js'), "module.exports = function clsx() { return Array.from(arguments).filter(Boolean).join(' '); };", 'utf-8');
 
     const entryCandidates = [
       'src/main.tsx', 'src/main.jsx', 'src/main.ts', 'src/main.js',
@@ -131,25 +126,10 @@ app.post('/build', authMiddleware, async (req, res) => {
         'react-dom/client': reactDomClientShimPath,
         'react': reactShimPath,
         'react-dom': reactDomShimPath,
-        'framer-motion': framerShimPath,
-        'clsx': clsxShimPath,
       },
       plugins: [
         reactDomClientFirstPlugin,
         cssExtractPlugin,
-        {
-          name: 'react-icons-shim',
-          setup(build) {
-            build.onResolve({ filter: /^react-icons\// }, args => ({
-              path: args.path,
-              namespace: 'react-icons-shim',
-            }));
-            build.onLoad({ filter: /.*/, namespace: 'react-icons-shim' }, () => ({
-              contents: 'module.exports = {};',
-              loader: 'js',
-            }));
-          },
-        },
       ],
       loader: {
         '.tsx': 'tsx',
