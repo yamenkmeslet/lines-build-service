@@ -116,6 +116,20 @@ app.post('/build', authMiddleware, async (req, res) => {
       },
     };
 
+    const reactIconsSubpackages = [
+      'fa', 'fa6', 'md', 'io', 'io5', 'ai', 'bs', 'bi', 'fi', 'gi',
+      'hi', 'hi2', 'im', 'lu', 'pi', 'ri', 'rx', 'si', 'sl', 'tb',
+      'ti', 'vsc', 'wi', 'cg', 'ci', 'fc', 'go', 'gr', 'tfi', 'lia',
+    ];
+    const iconAliases = {};
+    reactIconsSubpackages.forEach((pkg) => {
+      try {
+        iconAliases[`react-icons/${pkg}`] = require.resolve(`react-icons/${pkg}`);
+      } catch (e) {
+        // subpackage not present in this react-icons version; skip
+      }
+    });
+
     const result = await esbuild.build({
       entryPoints: [entryPath],
       bundle: true,
@@ -129,6 +143,7 @@ app.post('/build', authMiddleware, async (req, res) => {
         'react-dom': reactDomShimPath,
         'react/jsx-runtime': path.resolve(__dirname, 'node_modules/react/jsx-runtime.js'),
         'react/jsx-dev-runtime': path.resolve(__dirname, 'node_modules/react/jsx-dev-runtime.js'),
+        ...iconAliases,
       },
       plugins: [
         reactDomClientFirstPlugin,
