@@ -51,11 +51,33 @@ app.post('/build', authMiddleware, async (req, res) => {
     const reactDomShimPath = path.resolve(buildDir, '__react-dom-shim.js');
     const reactDomClientShimPath = path.resolve(buildDir, '__react-dom-client-shim.js');
     console.log('reactShimPath:', reactShimPath);
-    await fs.promises.writeFile(path.join(buildDir, '__react-shim.js'), "module.exports = typeof window !== 'undefined' ? window.React : {};", 'utf-8');
-    await fs.promises.writeFile(path.join(buildDir, '__react-dom-shim.js'), "module.exports = typeof window !== 'undefined' ? window.ReactDOM : {};", 'utf-8');
+    await fs.promises.writeFile(
+      path.join(buildDir, '__react-shim.js'),
+      'export default typeof window !== "undefined" ? (window.React ?? {}) : {};\n',
+      'utf-8'
+    );
+    await fs.promises.writeFile(
+      path.join(buildDir, '__react-dom-shim.js'),
+      'export default typeof window !== "undefined" ? (window.ReactDOM ?? {}) : {};\n',
+      'utf-8'
+    );
     await fs.promises.writeFile(
       path.join(buildDir, '__react-dom-client-shim.js'),
-      "var ReactDOM = typeof window !== 'undefined' ? window.ReactDOM : {};\nmodule.exports = { createRoot: ReactDOM.createRoot || function() { throw new Error('createRoot requires ReactDOM'); }, hydrateRoot: ReactDOM.hydrateRoot || function() { throw new Error('hydrateRoot requires ReactDOM'); } };",
+      [
+        'export function createRoot(...args) {',
+        '  const ReactDOM = typeof window !== "undefined" ? window.ReactDOM : {};',
+        '  const fn = ReactDOM.createRoot;',
+        '  if (!fn) throw new Error("createRoot requires ReactDOM");',
+        '  return fn.apply(ReactDOM, args);',
+        '}',
+        'export function hydrateRoot(...args) {',
+        '  const ReactDOM = typeof window !== "undefined" ? window.ReactDOM : {};',
+        '  const fn = ReactDOM.hydrateRoot;',
+        '  if (!fn) throw new Error("hydrateRoot requires ReactDOM");',
+        '  return fn.apply(ReactDOM, args);',
+        '}',
+        '',
+      ].join('\n'),
       'utf-8'
     );
 
