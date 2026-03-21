@@ -180,7 +180,6 @@ app.post('/build', authMiddleware, async (req, res) => {
   <div id="root"></div>
   <script crossorigin src="${REACT_CDN}"></script>
   <script crossorigin src="${REACT_DOM_CDN}"></script>
-  <script src="https://unpkg.com/framer-motion@11/dist/framer-motion.js"></script>
   <script>${bundleJs}</script>
 </body>
 </html>`;
