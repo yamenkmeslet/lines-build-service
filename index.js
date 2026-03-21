@@ -2,7 +2,6 @@ const express = require('express');
 const esbuild = require('esbuild');
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 
 const app = express();
 app.use(express.json({ limit: '100mb' }));
@@ -47,39 +46,6 @@ app.post('/build', authMiddleware, async (req, res) => {
     }
 
     const toPosix = (p) => (p || '').split(path.sep).join('/');
-    const reactShimPath = path.resolve(buildDir, '__react-shim.js');
-    const reactDomShimPath = path.resolve(buildDir, '__react-dom-shim.js');
-    const reactDomClientShimPath = path.resolve(buildDir, '__react-dom-client-shim.js');
-    console.log('reactShimPath:', reactShimPath);
-    await fs.promises.writeFile(
-      path.join(buildDir, '__react-shim.js'),
-      'export default typeof window !== "undefined" ? (window.React ?? {}) : {};\n',
-      'utf-8'
-    );
-    await fs.promises.writeFile(
-      path.join(buildDir, '__react-dom-shim.js'),
-      'export default typeof window !== "undefined" ? (window.ReactDOM ?? {}) : {};\n',
-      'utf-8'
-    );
-    await fs.promises.writeFile(
-      path.join(buildDir, '__react-dom-client-shim.js'),
-      [
-        'export function createRoot(...args) {',
-        '  const ReactDOM = typeof window !== "undefined" ? window.ReactDOM : {};',
-        '  const fn = ReactDOM.createRoot;',
-        '  if (!fn) throw new Error("createRoot requires ReactDOM");',
-        '  return fn.apply(ReactDOM, args);',
-        '}',
-        'export function hydrateRoot(...args) {',
-        '  const ReactDOM = typeof window !== "undefined" ? window.ReactDOM : {};',
-        '  const fn = ReactDOM.hydrateRoot;',
-        '  if (!fn) throw new Error("hydrateRoot requires ReactDOM");',
-        '  return fn.apply(ReactDOM, args);',
-        '}',
-        '',
-      ].join('\n'),
-      'utf-8'
-    );
 
     const entryCandidates = [
       'src/main.tsx', 'src/main.jsx', 'src/main.ts', 'src/main.js',
@@ -129,15 +95,6 @@ app.post('/build', authMiddleware, async (req, res) => {
       },
     };
 
-    const reactDomClientFirstPlugin = {
-      name: 'react-dom-client-first',
-      setup(build) {
-        build.onResolve({ filter: /^react-dom\/client$/ }, () => ({
-          path: reactDomClientShimPath,
-        }));
-      },
-    };
-
     const reactIconsSubpackages = [
       'fa', 'fa6', 'md', 'io', 'io5', 'ai', 'bs', 'bi', 'fi', 'gi',
       'hi', 'hi2', 'im', 'lu', 'pi', 'ri', 'rx', 'si', 'sl', 'tb',
@@ -160,17 +117,11 @@ app.post('/build', authMiddleware, async (req, res) => {
       target: ['es2020'],
       write: false,
       alias: {
-        'react-dom/client': reactDomClientShimPath,
-        'react': reactShimPath,
-        'react-dom': reactDomShimPath,
         'react/jsx-runtime': path.resolve(__dirname, 'node_modules/react/jsx-runtime.js'),
         'react/jsx-dev-runtime': path.resolve(__dirname, 'node_modules/react/jsx-dev-runtime.js'),
         ...iconAliases,
       },
-      plugins: [
-        reactDomClientFirstPlugin,
-        cssExtractPlugin,
-      ],
+      plugins: [cssExtractPlugin],
       loader: {
         '.tsx': 'tsx',
         '.ts': 'ts',
