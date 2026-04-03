@@ -6,8 +6,11 @@ const path = require('path');
 const app = express();
 app.use(express.json({ limit: '100mb' }));
 
-const PORT = process.env.PORT || 3001;
-const BUILD_SECRET = process.env.BUILD_SECRET;
+// Default port 3002 — avoids collision with lines-ai-orchestrator which uses 3001.
+const PORT = process.env.PORT || 3002;
+// Next.js sends Authorization: Bearer RAILWAY_BUILD_SECRET — accept same value here.
+// Prefer BUILD_SECRET; fall back so one Railway env var name works for both sides.
+const BUILD_SECRET = process.env.BUILD_SECRET || process.env.RAILWAY_BUILD_SECRET || '';
 
 function authMiddleware(req, res, next) {
   if (!BUILD_SECRET) {
@@ -176,5 +179,9 @@ app.post('/build', authMiddleware, async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`[lines-build-service] listening on port ${PORT}`);
+  console.log(`[lines-build-service] listening on port ${PORT}`, {
+    authEnabled: Boolean(BUILD_SECRET),
+    healthPath: '/health',
+    buildPath: 'POST /build',
+  });
 });
