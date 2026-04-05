@@ -112,6 +112,31 @@ app.post('/build', authMiddleware, async (req, res) => {
       }
     });
 
+    // Resolve aliases for all allowed packages so esbuild picks them up from node_modules.
+    const safeResolve = (pkg) => {
+      try { return require.resolve(pkg); } catch { return undefined; }
+    };
+    const pkgAliases = {};
+    const allowedPkgs = [
+      'clsx',
+      'framer-motion',
+      'tailwind-merge',
+      'lucide-react',
+      '@tabler/icons-react',
+      'react-router-dom',
+      'date-fns',
+      'zustand',
+      'recharts',
+      'react-hook-form',
+      'swiper',
+      'leaflet',
+      'react-leaflet',
+    ];
+    for (const pkg of allowedPkgs) {
+      const resolved = safeResolve(pkg);
+      if (resolved) pkgAliases[pkg] = resolved;
+    }
+
     const result = await esbuild.build({
       entryPoints: [entryPath],
       bundle: true,
@@ -123,6 +148,7 @@ app.post('/build', authMiddleware, async (req, res) => {
         'react/jsx-runtime': path.resolve(__dirname, 'node_modules/react/jsx-runtime.js'),
         'react/jsx-dev-runtime': path.resolve(__dirname, 'node_modules/react/jsx-dev-runtime.js'),
         ...iconAliases,
+        ...pkgAliases,
       },
       plugins: [cssExtractPlugin],
       loader: {
