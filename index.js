@@ -11,9 +11,9 @@ app.use(express.json({ limit: '100mb' }));
 
 // Default port 3002 — avoids collision with lines-ai-orchestrator which uses 3001.
 const PORT = process.env.PORT || 3002;
-// Next.js sends Authorization: Bearer RAILWAY_BUILD_SECRET — accept same value here.
-// Prefer BUILD_SECRET; fall back so one Railway env var name works for both sides.
-const BUILD_SECRET = process.env.BUILD_SECRET || process.env.RAILWAY_BUILD_SECRET || '';
+// Next.js sends Authorization: Bearer BUILD_SERVICE_SECRET — accept same value here.
+// Prefer BUILD_SECRET on the service; BUILD_SERVICE_SECRET is an alias for the shared token.
+const BUILD_SECRET = process.env.BUILD_SECRET || process.env.BUILD_SERVICE_SECRET || '';
 
 function resolveSafeBuildPath(buildDir, filePath) {
   const normalized = String(filePath || '').replace(/^\/+/, '').trim();
