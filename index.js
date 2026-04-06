@@ -2,6 +2,9 @@ const express = require('express');
 const esbuild = require('esbuild');
 const fs = require('fs');
 const path = require('path');
+const postcss = require('postcss');
+const tailwindcss = require('tailwindcss');
+const autoprefixer = require('autoprefixer');
 
 const app = express();
 app.use(express.json({ limit: '100mb' }));
@@ -12,8 +15,25 @@ const PORT = process.env.PORT || 3002;
 // Prefer BUILD_SECRET; fall back so one Railway env var name works for both sides.
 const BUILD_SECRET = process.env.BUILD_SECRET || process.env.RAILWAY_BUILD_SECRET || '';
 
+function resolveSafeBuildPath(buildDir, filePath) {
+  const normalized = String(filePath || '').replace(/^\/+/, '').trim();
+  if (!normalized || normalized.includes('\0')) {
+    return null;
+  }
+  const fullPath = path.resolve(buildDir, normalized);
+  const relative = path.relative(buildDir, fullPath);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    return null;
+  }
+  return { normalized, fullPath };
+}
+
 function authMiddleware(req, res, next) {
   if (!BUILD_SECRET) {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(503).json({ success: false, error: 'Build service secret is not configured', code: 'BUILD_SECRET_MISSING' });
+    }
+    console.warn('[lines-build-service] BUILD_SECRET is missing; allowing unauthenticated requests in non-production mode');
     return next();
   }
   const auth = req.headers.authorization;
@@ -38,14 +58,18 @@ app.post('/build', authMiddleware, async (req, res) => {
     }
 
     await fs.promises.mkdir(buildDir, { recursive: true });
+    const writtenRelativePaths = [];
 
     for (const [filePath, content] of Object.entries(files)) {
       if (typeof content !== 'string') continue;
-      const normalized = filePath.replace(/^\/+/, '').trim();
-      if (!normalized) continue;
-      const fullPath = path.join(buildDir, normalized);
+      const resolved = resolveSafeBuildPath(buildDir, filePath);
+      if (!resolved) {
+        return res.status(400).json({ success: false, error: `Invalid file path: ${filePath}`, code: 'INVALID_FILE_PATH' });
+      }
+      const { normalized, fullPath } = resolved;
       await fs.promises.mkdir(path.dirname(fullPath), { recursive: true });
       await fs.promises.writeFile(fullPath, content, 'utf-8');
+      writtenRelativePaths.push(normalized);
     }
 
     const toPosix = (p) => (p || '').split(path.sep).join('/');
@@ -67,10 +91,10 @@ app.post('/build', authMiddleware, async (req, res) => {
       }
     }
     if (!entryPath) {
-      const firstJs = Object.keys(files).find((p) => /\.(tsx?|jsx?)$/.test(p));
+      const firstJs = writtenRelativePaths.find((p) => /\.(tsx?|jsx?)$/i.test(p));
       if (firstJs) {
-        const normalized = firstJs.replace(/^\/+/, '').trim();
-        entryPath = path.join(buildDir, normalized);
+        const resolved = resolveSafeBuildPath(buildDir, firstJs);
+        if (resolved) entryPath = resolved.fullPath;
       }
     }
     if (!entryPath) {
@@ -150,6 +174,7 @@ app.post('/build', authMiddleware, async (req, res) => {
         ...iconAliases,
         ...pkgAliases,
       },
+      jsx: 'automatic',
       plugins: [cssExtractPlugin],
       loader: {
         '.tsx': 'tsx',
@@ -166,22 +191,45 @@ app.post('/build', authMiddleware, async (req, res) => {
 
     const out = result.outputFiles[0];
     const bundleJs = out ? out.text : '';
-    const bundledCss = collectedCss.join('\n');
 
-    const REACT_CDN = 'https://unpkg.com/react@18/umd/react.production.min.js';
-    const REACT_DOM_CDN = 'https://unpkg.com/react-dom@18/umd/react-dom.production.min.js';
+    const rawCss = [
+      '@tailwind base;',
+      '@tailwind components;',
+      '@tailwind utilities;',
+      ...collectedCss
+    ].join('\n');
+
+    let bundledCss = '';
+    try {
+      const tailwindConfig = {
+        content: [path.join(buildDir, '**/*.{js,jsx,ts,tsx,html}')],
+        theme: { extend: {} },
+        plugins: [],
+      };
+      
+      const postcssResult = await postcss([
+        tailwindcss(tailwindConfig),
+        autoprefixer
+      ]).process(rawCss, { from: undefined });
+      
+      bundledCss = postcssResult.css;
+    } catch (postcssErr) {
+      console.warn('[lines-build-service] postcss error:', postcssErr);
+      bundledCss = rawCss; // Fallback
+    }
 
     const indexHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>App</title>${bundledCss ? `\n  <style>${bundledCss.replace(/<\/style>/gi, '\\3c/style>')}</style>` : ''}
+  <title>App</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">${bundledCss ? `\n  <style>${bundledCss.replace(/<\/style>/gi, '\\3c/style>')}</style>` : ''}
 </head>
 <body>
   <div id="root"></div>
-  <script crossorigin src="${REACT_CDN}"></script>
-  <script crossorigin src="${REACT_DOM_CDN}"></script>
   <script>${bundleJs}</script>
 </body>
 </html>`;
