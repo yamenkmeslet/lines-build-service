@@ -1,10 +1,12 @@
 const express = require('express');
 const esbuild = require('esbuild');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const postcss = require('postcss');
 const tailwindcss = require('tailwindcss');
 const autoprefixer = require('autoprefixer');
+const { extractBuildDiagnostic } = require('./build-diagnostics');
 
 const app = express();
 app.use(express.json({ limit: '100mb' }));
@@ -13,7 +15,17 @@ app.use(express.json({ limit: '100mb' }));
 const PORT = process.env.PORT || 3002;
 // Next.js sends Authorization: Bearer BUILD_SERVICE_SECRET — accept same value here.
 // Prefer BUILD_SECRET on the service; BUILD_SERVICE_SECRET is an alias for the shared token.
-const BUILD_SECRET = process.env.BUILD_SECRET || process.env.BUILD_SERVICE_SECRET || '';
+const BUILD_SECRET = String(process.env.BUILD_SECRET || process.env.BUILD_SERVICE_SECRET || '').trim();
+
+if (process.env.NODE_ENV === 'production' && !BUILD_SECRET) {
+  throw new Error('BUILD_SECRET or BUILD_SERVICE_SECRET must be configured in production');
+}
+
+function safeTokenEqual(a, b) {
+  const left = Buffer.from(String(a || ''));
+  const right = Buffer.from(String(b || ''));
+  return left.length === right.length && crypto.timingSafeEqual(left, right);
+}
 
 function resolveSafeBuildPath(buildDir, filePath) {
   const normalized = String(filePath || '').replace(/^\/+/, '').trim();
@@ -37,8 +49,8 @@ function authMiddleware(req, res, next) {
     return next();
   }
   const auth = req.headers.authorization;
-  const token = auth && auth.startsWith('Bearer ') ? auth.slice(7) : '';
-  if (token !== BUILD_SECRET) {
+  const token = auth && auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  if (!safeTokenEqual(token, BUILD_SECRET)) {
     return res.status(401).json({ success: false, error: 'Unauthorized' });
   }
   next();
@@ -136,30 +148,16 @@ app.post('/build', authMiddleware, async (req, res) => {
       }
     });
 
-    // Resolve aliases for all allowed packages so esbuild picks them up from node_modules.
     const safeResolve = (pkg) => {
       try { return require.resolve(pkg); } catch { return undefined; }
     };
-    const pkgAliases = {};
-    const allowedPkgs = [
-      'clsx',
-      'framer-motion',
-      'tailwind-merge',
-      'lucide-react',
-      '@tabler/icons-react',
-      'react-router-dom',
-      'date-fns',
-      'zustand',
-      'recharts',
-      'react-hook-form',
-      'swiper',
-      'leaflet',
-      'react-leaflet',
-    ];
-    for (const pkg of allowedPkgs) {
-      const resolved = safeResolve(pkg);
-      if (resolved) pkgAliases[pkg] = resolved;
-    }
+    const jsxRuntime = safeResolve('react/jsx-runtime');
+    const jsxDevRuntime = safeResolve('react/jsx-dev-runtime');
+    const baseAliases = {
+      ...(jsxRuntime ? { 'react/jsx-runtime': jsxRuntime } : {}),
+      ...(jsxDevRuntime ? { 'react/jsx-dev-runtime': jsxDevRuntime } : {}),
+      ...iconAliases,
+    };
 
     const result = await esbuild.build({
       entryPoints: [entryPath],
@@ -168,12 +166,7 @@ app.post('/build', authMiddleware, async (req, res) => {
       platform: 'browser',
       target: ['es2020'],
       write: false,
-      alias: {
-        'react/jsx-runtime': path.resolve(__dirname, 'node_modules/react/jsx-runtime.js'),
-        'react/jsx-dev-runtime': path.resolve(__dirname, 'node_modules/react/jsx-dev-runtime.js'),
-        ...iconAliases,
-        ...pkgAliases,
-      },
+      alias: baseAliases,
       jsx: 'automatic',
       plugins: [cssExtractPlugin],
       loader: {
@@ -241,8 +234,21 @@ app.post('/build', authMiddleware, async (req, res) => {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[lines-build-service] build error:', err);
-    const code = message.includes('Could not resolve') || message.includes('resolve') ? 'RESOLVE_FAILED' : message.includes('Build') || message.includes('build') ? 'BUILD_FAILED' : 'BUILD_FAILED';
-    res.status(500).json({ success: false, error: message, code });
+    const diagnostic = extractBuildDiagnostic(err, message);
+    const code = diagnostic.code || 'UNKNOWN_BUILD_FAILURE';
+    res.status(500).json({
+      success: false,
+      error: message,
+      code,
+      failureClass: diagnostic.failureClass,
+      ...(diagnostic.failedFile ? { failedFile: diagnostic.failedFile } : {}),
+      ...(diagnostic.failedImport ? { failedImport: diagnostic.failedImport } : {}),
+      ...(diagnostic.file ? { file: diagnostic.file } : {}),
+      ...(typeof diagnostic.line === 'number' ? { line: diagnostic.line } : {}),
+      ...(typeof diagnostic.column === 'number' ? { column: diagnostic.column } : {}),
+      diagnostic,
+      diagnosticBundle: diagnostic,
+    });
   } finally {
     try {
       await fs.promises.rm(buildDir, { recursive: true, force: true });
